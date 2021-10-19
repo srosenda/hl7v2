@@ -3,6 +3,7 @@ const assert = require('assert');
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const iconv = require('iconv-lite');
 const {HL7Message, HL7Server, HL7Client, createServer, connect} = require('../');
 const {VT, FS} = require('../lib/types');
 const {rejects, doesNotReject} = require('rejected-or-not');
@@ -164,6 +165,45 @@ describe('HL7Server', function() {
         client.sendReceive(msg).then(resp => {
           try {
             assert.strictEqual(ack.toHL7(), resp.toHL7());
+            server.close().then(() => done());
+          } catch (e) {
+            done(e);
+          }
+        });
+      });
+    }).catch((e) => done(e));
+  });
+
+  it('should receive hl7 messages and send response with ISO 8859-1 encoding', function(done) {
+    const encoding = 'iso-8859-1';
+
+    const sampleIso8859Message1 = sampleMessage1.replace('TESTPAT', 'Scandinavian patient åäöÅÄÖæøÆØ');
+    const iso8859Ack1 = ack1.replace('StJohn', 'Scandinavian hospital åäöÅÄÖæøÆØ');
+
+    server = new HL7Server({ encoding });
+
+    // Simulate client using ISO 8859-1 encoding
+    const client = new HL7Client();
+    client.setEncoding(encoding);
+
+    server.listen(8080).then(() => {
+      const msg = HL7Message.parse(sampleIso8859Message1);
+      const ack = HL7Message.parse(iso8859Ack1);
+
+      server.use((req) => {
+        try {
+          assert.strictEqual(req.getSegment('PID').PatientName[0].GivenName.value, 'Scandinavian patient åäöÅÄÖæøÆØ');
+          return ack;
+        } catch (e) {
+          done(e);
+        }
+      });
+
+      client.connect(8080).then(() => {
+        client.sendReceive(msg).then(res => {
+          try {
+            assert.strictEqual(ack.toHL7(), res.toHL7());
+            assert.strictEqual(res.MSH.ReceivingFacility.value, 'Scandinavian hospital åäöÅÄÖæøÆØ');
             server.close().then(() => done());
           } catch (e) {
             done(e);
