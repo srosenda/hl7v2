@@ -7,6 +7,7 @@ const iconv = require('iconv-lite');
 const {HL7Message, HL7Server, HL7Client, createServer, connect} = require('../');
 const {VT, FS} = require('../lib/types');
 const {rejects, doesNotReject} = require('rejected-or-not');
+const {xVT, xFS, xCR} = require('../lib/types');
 
 assert.rejects = assert.rejects || rejects;
 assert.doesNotReject = assert.doesNotReject || doesNotReject;
@@ -27,6 +28,24 @@ NTE|1|L|ROUTINE RESPIRATORY FLORA
 `.replace(/\n/, '\r');
 const ack1 = `MSH|^~\\&|LCA|LCS|AcmeHIS|StJohn|19980731153200||ACK^O01|1235|P|2.2
 MSA|AA|1234`.replace(/\n/, '\r');
+
+function waitForArrayLength(timeout, length, getLength) {
+  const timeoutAt = Date.now() + timeout;
+
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(() => {
+      if (getLength() === length) {
+        clearInterval(interval);
+        return resolve();
+      }
+
+      if (Date.now() > timeoutAt) {
+        clearInterval(interval);
+        return reject(new Error("timeout reached"));
+      }
+    }, 10);
+  })
+}
 
 describe('HL7Server', function() {
 
@@ -87,6 +106,99 @@ describe('HL7Server', function() {
   it('should add middle-wares', function() {
     server = new HL7Server();
     server.use(() => {});
+  });
+
+  it('should emit valid hl7 payloads', function(done) {
+    server = new HL7Server();
+
+    server.listen(8080).then(() => {
+      const payloads = [];
+      server.on('payload', (payload) => payloads.push(payload.toString("utf-8")));
+
+      const msg = HL7Message.parse(sampleMessage1);
+
+      let handlerCallCount = 0;
+      server.use((req) => {
+        handlerCallCount += 1;
+
+        try {
+          assert.strictEqual(req.toHL7(), msg.toHL7());
+        } catch (e) {
+          done(e);
+        }
+      });
+
+      const client = new HL7Client();
+
+      return client
+        .connect(8080)
+        .then(() => client.sendReceive(msg))
+        .then(() => client.close())
+        .then(() => server.close())
+        .then(() => waitForArrayLength(1000, 1, () => payloads.length))
+        .then(() => {
+          try {
+            assert.strictEqual(handlerCallCount, 1);
+            assert.equal(payloads[0].length > 0, true);
+
+            done()
+          } catch (e) {
+            done(e)
+          }
+        });
+    }).catch((e) => done(e));
+  });
+
+  it('should emit invalid payloads', function(done) {
+    server = new HL7Server();
+
+    server.listen(8080).then(() => {
+      const payloads = [];
+      server.on('payload', (payload) => payloads.push(payload.toString('utf-8')));
+
+      let handlerCallCount = 0;
+      server.use((_) => {
+        handlerCallCount += 1;
+      });
+
+      const client = new HL7Client();
+
+      client.sendHl7Message = (str) => {
+        return new Promise((resolve) => {
+          const _buf = Buffer.from([xVT, ...iconv.encode(str, 'utf8'), xFS, xCR]);
+
+          client._socket.write(_buf, null, () => {
+            // this will not close the socket but just "end" sending data
+            client._socket.end(() => {
+              resolve();
+            });
+          });
+        });
+      };
+
+      // construct an invalid HL7 message
+      let msg = HL7Message.parse(sampleMessage1).toHL7();
+      const lines = msg.split('\r');
+      lines[1] = ['UNKNOWN', ...lines[1].split('|').slice(1)].join("|")
+      msg = lines.join('\r')
+
+      return client
+        .connect(8080)
+        .then(() => client.sendHl7Message(msg))
+        .then(() => client.close())
+        .then(() => server.close())
+        .then(() => waitForArrayLength(1000, 1, () => payloads.length))
+        .then(() => {
+          try {
+            assert.strictEqual(handlerCallCount, 0);
+            assert.equal(payloads[0].length > 0, true);
+
+            done()
+          } catch (e) {
+            done(e)
+          }
+        });
+    }).catch((e) => done(e));
   });
 
   it('should receive hl7 messages', function(done) {
@@ -174,21 +286,21 @@ describe('HL7Server', function() {
     }).catch((e) => done(e));
   });
 
-  it('should receive hl7 messages and send response with ISO 8859-1 encoding', function(done) {
-    const encoding = 'iso-8859-1';
+  it('should receive hl7 messages and send response with Latin 1 encoding', function(done) {
+    const encoding = 'latin1';
 
-    const sampleIso8859Message1 = sampleMessage1.replace('TESTPAT', 'Scandinavian patient åäöÅÄÖæøÆØ');
-    const iso8859Ack1 = ack1.replace('StJohn', 'Scandinavian hospital åäöÅÄÖæøÆØ');
+    const sampleLatin1Message1 = sampleMessage1.replace('TESTPAT', 'Scandinavian patient åäöÅÄÖæøÆØ');
+    const latin1Ack1 = ack1.replace('StJohn', 'Scandinavian hospital åäöÅÄÖæøÆØ');
 
     server = new HL7Server({ encoding });
 
-    // Simulate client using ISO 8859-1 encoding
+    // Simulate client using Latin 1 encoding
     const client = new HL7Client();
     client.setEncoding(encoding);
 
     server.listen(8080).then(() => {
-      const msg = HL7Message.parse(sampleIso8859Message1);
-      const ack = HL7Message.parse(iso8859Ack1);
+      const msg = HL7Message.parse(sampleLatin1Message1);
+      const ack = HL7Message.parse(latin1Ack1);
 
       server.use((req) => {
         try {
