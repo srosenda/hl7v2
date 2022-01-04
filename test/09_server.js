@@ -7,7 +7,6 @@ const iconv = require('iconv-lite');
 const {HL7Message, HL7Server, HL7Client, createServer, connect} = require('../');
 const {xVT, VT, FS, xFS, xCR} = require('../lib/types');
 const {rejects, doesNotReject} = require('rejected-or-not');
-const {xVT, xFS, xCR} = require('../lib/types');
 
 assert.rejects = assert.rejects || rejects;
 assert.doesNotReject = assert.doesNotReject || doesNotReject;
