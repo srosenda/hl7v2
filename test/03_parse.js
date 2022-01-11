@@ -95,6 +95,27 @@ describe('Parse HL7 message', function() {
     assert.deepStrictEqual(seg.ExplicitTime.value, new Date('0000-01-01T13:45:23.000Z'));
   });
 
+  it('should apply message header timestamp timezone to date fields in other segments', function() {
+    const msg = HL7Message.parse('MSH|^~\\&|||||201506301532.123+0300|||||2.5\r' +
+        'AL1|1|||||20151231\r');
+    const seg = msg.getSegment('AL1');
+    assert.deepStrictEqual(seg.IdentificationDate.value, new Date('2015-12-31T00:00:00.000+0300'));
+  });
+
+  it('should apply message header timestamp timezone to time fields in other segments', function() {
+    const msg = HL7Message.parse('MSH|^~\\&|||||201506301532.123+0300|||||2.5\r' +
+    'TQ1||||134523');
+    const seg = msg.getSegment('TQ1');
+    assert.deepStrictEqual(seg.ExplicitTime.value, new Date('0000-01-01T13:45:23.000+0300'));
+  });
+
+  it('should apply message header timestamp timezone to date time fields in other segments', function() {
+    const msg = HL7Message.parse('MSH|^~\\&|||||201506301532.123+0300||SIU^S12|||2.5\r' +
+        'SCH||||||NW^Booking appointed|||||^^20^20150830080000||||||||||||||||\r');
+    const seg = msg.getSegment('SCH');
+    assert.deepStrictEqual(seg.AppointmentTimingQuantity[0].StartDateTime.value, new Date('2015-08-30T08:30:00.000+0300'));
+  });
+
   it('should parse escaped characters', function() {
     const msg = HL7Message.parse('MSH|^~\\&|\\F\\\\S\\\\R\\\\E\\\\T\\abcd\\U\\|\\c65\\\\M015f\\\\M0000\\||||||||2.2|1234');
     assert(msg.MSH);
